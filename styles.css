@@ -3,3 +3,12 @@
 .graph-stage{width:100%;min-width:0}
 
 .site-header{height:56px;justify-content:flex-end}
+
+.closeness-toggle{margin:13px 0;font-size:11px;color:#596982}
+.guess-quality{background:#f7f9fc;border:1px solid var(--line);border-left:3px solid #dce2ed;border-radius:7px;padding:12px;margin:12px 0}
+.quality-heading{display:flex;flex-wrap:wrap;justify-content:space-between;gap:5px;font-size:10px;color:var(--muted)}
+.quality-heading strong{font-size:11px;color:var(--ink)}
+.quality-track{position:relative;height:9px;margin:15px 5px 6px;border-radius:8px;background:linear-gradient(to right,hsl(120,65%,40%),hsl(90,65%,40%),hsl(60,65%,40%),hsl(30,65%,40%),hsl(0,65%,40%))}
+.quality-track>span{position:absolute;top:-4px;width:5px;height:17px;transform:translateX(-50%);background:var(--ink);outline:2px solid white;border-radius:3px;transition:left .2s}
+.quality-ends{display:flex;justify-content:space-between;font-size:9px;color:var(--muted)}
+.guess-quality .fine-print{margin:9px 0 0;font-size:9px}

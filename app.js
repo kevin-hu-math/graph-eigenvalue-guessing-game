@@ -15,7 +15,7 @@ const palettes = {
   PuOr:['#7f3b08','#b35806','#e08214','#fdb863','#f7f7f7','#b2abd2','#8073ac','#542788','#2d004b'],
   viridis:['#440154','#472d7b','#3b528b','#2c728e','#21918c','#28ae80','#5ec962','#addc30','#fde725']
 };
-let state = null, busy = true, backend, runtimeLabel, saved = false, positions = [], drag = null;
+let state = null, busy = true, backend, saved = false, positions = [], drag = null;
 const session = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random();
 let roundKey = session;
 const format = value => Math.abs(value) < 5e-10 ? '0' : Number(value.toFixed(7)).toString().replace('-', '−');
@@ -55,11 +55,13 @@ function readConfig() {
   }
   if ($('seed').value.trim() === '') config.seed = crypto.getRandomValues(new Uint32Array(1))[0];
   config.connected = $('connected').checked;
+  config.guess_feedback = $('guessFeedback').checked;
   return config;
 }
 function applyConfig(config) {
   for (const [key, id] of Object.entries(fields)) if (key in config) $(id).value = config[key];
   if ('connected' in config) $('connected').checked = config.connected;
+  $('guessFeedback').checked = Boolean(config.guess_feedback);
   updateModel();
 }
 async function makeBackend() {
@@ -70,7 +72,6 @@ async function makeBackend() {
     if (response.ok && (response.headers.get('content-type') || '').includes('application/json')) runtime = await response.json();
   } catch (_) { /* Static hosting uses the worker below. */ }
   if (runtime?.native) {
-    runtimeLabel = 'Local Python · NumPy · NetworkX';
     return async request => {
       const response = await fetch('api/action', {method:'POST', headers:{'Content-Type':'application/json','X-Spectrum-Token':runtime.token}, body:JSON.stringify({...request,session})});
       const result = await response.json();
@@ -78,7 +79,6 @@ async function makeBackend() {
       return result.data;
     };
   }
-  runtimeLabel = 'Browser Python · Pyodide · NetworkX';
   return await new Promise((resolve, reject) => {
     const worker = new Worker('worker.js');
     const pendingCalls = new Map();
@@ -170,6 +170,7 @@ async function draw() {
   } else drawSVG();
 }
 function renderState() {
+  renderGuessQuality();
   $('graphTitle').textContent = state.model_name;
   $('graphMeta').textContent = `${state.config.n} vertices · ${state.edges.length} edges`;
   $('score').textContent = state.score.toLocaleString();
@@ -182,7 +183,6 @@ function renderState() {
   $('roundStatus').classList.toggle('solved',state.status==='solved');
   $('discoveredCount').textContent = `${state.found_count} found`;
   $('seedLabel').textContent = `Seed ${state.config.seed} · unweighted adjacency`;
-  $('engineLabel').textContent = runtimeLabel;
   $('layout').value = state.layout;
   $('spectrum').replaceChildren();
   if (!state.modes.length) $('spectrum').append(el('span',{className:'empty-spectrum'},'Your spectrum will appear here.'));
@@ -223,6 +223,19 @@ function renderState() {
   if (state.status==='solved') feedback(`Spectrum complete! All ${state.config.n} eigenvalues found. Final score: ${state.score}.`,'success');
   else if (state.status==='given_up') feedback('Full spectrum revealed. Gray values were not guessed. Select any value to explore its eigenvector.','');
 }
+function renderGuessQuality() {
+  const enabled = state.config.guess_feedback, quality = state.guess_quality;
+  $('guessFeedback').checked = enabled;
+  $('guessQuality').hidden = !enabled;
+  $('qualityScale').hidden = !quality;
+  $('qualityGuess').textContent = quality ? `Last guess · ${format(quality.guess)}` : 'Last guess';
+  $('qualityLabel').textContent = quality ? quality.label : 'Make a guess to see its closeness.';
+  const hue = quality ? 120 * (1 - quality.position) : 0;
+  $('qualityLabel').style.color = quality ? `hsl(${hue}, 70%, 28%)` : '';
+  $('qualityMarker').style.left = `${100 * (quality?.position || 0)}%`;
+  $('guessQuality').style.borderLeftColor = quality ? `hsl(${hue}, 65%, 40%)` : '';
+  $('qualityHelp').textContent = `Green: within ±${state.config.epsilon}. Red: ${format(10*state.config.epsilon)} or more away. Compared with the eigenvalues remaining when you guessed.`;
+}
 function feedback(text,type='') { $('feedback').textContent=text; $('feedback').className=`feedback ${type}`; }
 async function act(request) {
   if (busy) return;
@@ -245,12 +258,12 @@ async function act(request) {
     }
     if (request.action==='hint') feedback(`An eigenvector of an unfound eigenvalue is now visible. Hint cost: ${state.config.hint_cost} points.`);
     renderState();
-    await draw();
+    if (request.action !== 'feedback') await draw();
     notice(`Current round: ε = ${state.config.epsilon} · ${state.config.guess_cost} points per guess · ${state.config.hint_cost} per hint${$('pending').hidden?'':' · Settings changes are pending.'}`);
     successful=true;
   } catch(error) {
     notice(error.message,true);
-    if (state) $('layout').value=state.layout;
+    if (state) { $('layout').value=state.layout; $('guessFeedback').checked=state.config.guess_feedback; }
   } finally {
     $('loading').hidden=true;
     setBusy(false);
@@ -285,20 +298,21 @@ function startRound() {
   if (layout==='planar' && $('model').value!=='planar') layout='spring';
   act({action:'new',config:readConfig(),layout});
 }
-function rulesKey(config) { return JSON.stringify(Object.fromEntries(Object.entries(config).filter(([k])=>k!=='seed').sort(([a],[b])=>a.localeCompare(b)))); }
+function rulesKey(config) { return JSON.stringify(Object.fromEntries(Object.entries({guess_feedback:false,...config}).filter(([k])=>k!=='seed').sort(([a],[b])=>a.localeCompare(b)))); }
+function currentRules() { return {...state.config,guess_feedback:state.feedback_used || (state.status==='playing' && state.config.guess_feedback)}; }
 function loadRecords() {
   try { const value=JSON.parse(localStorage.getItem('spectrum-records-v1')||'[]'); return Array.isArray(value)?value.filter(r=>r && typeof r.name==='string' && Number.isFinite(r.score) && r.config && typeof r.model==='string').slice(0,100):[]; }
   catch(_) { return []; }
 }
 function showRecords() {
   let records=loadRecords();
-  if ($('matchingRules').checked && state) records=records.filter(record=>rulesKey(record.config)===rulesKey(state.config));
+  if ($('matchingRules').checked && state) records=records.filter(record=>rulesKey(record.config)===rulesKey(currentRules()));
   records.sort((a,b)=>b.score-a.score || a.attempts-b.attempts);
   $('recordsList').replaceChildren();
   if (!records.length) $('recordsList').append(el('p',{},'No completed rounds saved with these rules yet.'));
   records.forEach((record,i)=>{
     const row=el('div',{className:'record'}), description=el('div');
-    description.append(el('strong',{},record.name),el('small',{},`${record.model} · N=${record.config.n} · ε=${record.config.epsilon} · ${record.attempts} guesses · ${record.hints} hints`));
+    description.append(el('strong',{},record.name),el('small',{},`${record.model} · N=${record.config.n} · ε=${record.config.epsilon} · ${record.attempts} guesses · ${record.hints} hints${record.config.guess_feedback?' · closeness assisted':''}`));
     row.append(el('span',{className:'record-rank'},String(i+1)),description,el('span',{className:'record-score'},String(record.score)));
     row.title=`Seed ${record.config.seed}; ${JSON.stringify(record.config)}`;
     $('recordsList').append(row);
@@ -308,7 +322,7 @@ $('saveScore').onclick=()=>{
   if (saved || state?.status!=='solved') return;
   try {
     const records=loadRecords();
-    if (!records.some(r=>r.id===roundKey)) records.push({id:roundKey,name:$('playerName').value.trim().slice(0,24)||'Player',score:state.score,attempts:state.attempts,hints:state.hints,model:state.model_name,config:state.config,date:new Date().toISOString()});
+    if (!records.some(r=>r.id===roundKey)) records.push({id:roundKey,name:$('playerName').value.trim().slice(0,24)||'Player',score:state.score,attempts:state.attempts,hints:state.hints,model:state.model_name,config:currentRules(),date:new Date().toISOString()});
     localStorage.setItem('spectrum-records-v1',JSON.stringify(records.slice(-100)));
     saved=true; $('saveScore').disabled=true; $('saveMessage').textContent='Saved on this browser.';
   } catch(_) { $('saveMessage').textContent='Browser storage is unavailable. This score could not be saved.'; }
@@ -328,6 +342,7 @@ $('configForm').onsubmit=event=>{event.preventDefault();startRound();};
 $('newGraph').onclick=startRound;
 $('guessForm').onsubmit=event=>{event.preventDefault();if ($('guess').value.trim() && $('guess').checkValidity()) act({action:'guess',value:Number($('guess').value)});};
 $('hintButton').onclick=()=>act({action:'hint'});
+$('guessFeedback').onchange=()=>act({action:'feedback',enabled:$('guessFeedback').checked});
 $('giveUp').onclick=()=>act({action:'give_up'});
 $('clearVector').onclick=()=>act({action:'select',id:null});
 $('layout').onchange=()=>act({action:'layout',layout:$('layout').value});

@@ -31,12 +31,16 @@ def config_from(raw):
     model = raw.get("model", "erdos")
     if model not in MODELS:
         raise ValueError("Choose a supported graph model.")
+    guess_feedback = raw.get("guess_feedback", False)
+    if not isinstance(guess_feedback, bool):
+        raise ValueError("Guess closeness must be on or off.")
     n = number(raw.get("n", 12), "N", 1, 50, True)
     c = {"model": model, "n": n,
          "seed": number(raw.get("seed", 42), "Seed", 0, 4294967295, True),
          "epsilon": number(raw.get("epsilon", .15), "Tolerance", 0.000001, 2),
          "guess_cost": number(raw.get("guess_cost", 10), "Guess penalty", 1, 100, True),
-         "hint_cost": number(raw.get("hint_cost", 50), "Hint penalty", 0, 500, True)}
+         "hint_cost": number(raw.get("hint_cost", 50), "Hint penalty", 0, 500, True),
+         "guess_feedback": guess_feedback}
     if model == "erdos":
         c["p"] = number(raw.get("p", .25), "Edge probability", 0, 1)
     elif model == "geometric":
@@ -138,6 +142,8 @@ class Game:
         self.hints = 0
         self.status = "playing"
         self.history = []
+        self.last_guess_quality = None
+        self.feedback_used = False
         self.active = None
         self.hint_ids = set()
         self.rng = random.Random(self.config["seed"] ^ 0xA13D)
@@ -159,6 +165,15 @@ class Game:
         # A few ulps protect inclusive interval boundaries, without broadening epsilon.
         slack = 8 * np.finfo(float).eps * max(1, abs(value), abs(float(self.values[index])))
         matched = bool(error <= self.config["epsilon"] + slack)
+        # Freeze feedback against the remaining spectrum BEFORE consuming a match.
+        distance_in_tolerances = error / self.config["epsilon"]
+        position = 0.0 if matched else min(1.0, max(0.0, (distance_in_tolerances - 1) / 9))
+        label = ("Within tolerance" if matched else "Very close" if distance_in_tolerances <= 2
+                 else "Close" if distance_in_tolerances <= 4 else "Somewhat close"
+                 if distance_in_tolerances <= 7 else "Far away")
+        self.last_guess_quality = {"guess": value, "position": float(position), "label": label}
+        if self.config["guess_feedback"]:
+            self.feedback_used = True
         entry = {"guess": value, "matched": matched}
         if matched:
             self.found.append(index)
@@ -169,6 +184,14 @@ class Game:
         # Keep rendering bounded, while attempts and penalties remain unlimited.
         self.history = self.history[-100:]
         return entry
+
+    def set_guess_feedback(self, enabled):
+        if not isinstance(enabled, bool):
+            raise ValueError("Guess closeness must be on or off.")
+        self.config["guess_feedback"] = enabled
+        # Turning feedback off later must not erase assistance already received.
+        if enabled and self.history and self.status == "playing":
+            self.feedback_used = True
 
     def hint(self):
         if self.status != "playing":
@@ -205,6 +228,8 @@ class Game:
                 "attempts": self.attempts, "hints": self.hints, "found_count": len(self.found),
                 "modes": [{"id": i, "value": float(self.values[i]), "found": i in self.found} for i in visible],
                 "active": active, "history": self.history,
+                "guess_quality": self.last_guess_quality if self.config["guess_feedback"] else None,
+                "feedback_used": self.feedback_used,
                 "hint_ids": sorted(self.hint_ids - set(self.found)) if not revealed else []}
 
     def plot(self, palette="RdBu_r", labels=True, node_size=420):
@@ -256,6 +281,8 @@ class Engine:
                 raise ValueError("Start a round first.")
             if action == "guess":
                 self.game.guess(request.get("value"))
+            elif action == "feedback":
+                self.game.set_guess_feedback(request.get("enabled"))
             elif action == "hint":
                 self.game.hint()
             elif action == "select":
