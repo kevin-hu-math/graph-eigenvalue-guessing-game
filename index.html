@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f6f7fb">
+  <meta name="description" content="Read a graph. Guess its adjacency eigenvalues. Explore its eigenvectors.">
+  <title>Guess the graph eigenvalues</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <nav aria-label="Main navigation"><button id="rulesButton" class="quiet">How to play</button><button id="recordsButton" class="quiet">Local leaderboard <span aria-hidden="true">↗</span></button></nav>
+  </header>
+  <main>
+    <section class="intro">
+      <div><h1>Guess the graph eigenvalues</h1><p>Guess the eigenvalues of its unweighted adjacency matrix, in any order.</p></div>
+      <button id="newGraph" class="primary" data-busy>New graph <span aria-hidden="true">↻</span></button>
+    </section>
+    <form id="configForm" class="config-strip">
+      <label>Graph model<select id="model"><option value="erdos">Erdős–Rényi</option><option value="geometric">Random geometric</option><option value="regular">Random regular</option><option value="planar">Random planar</option></select></label>
+      <label class="small-control">Vertices · N<input id="n" type="number" min="1" max="50" step="1" value="12" required></label>
+      <label class="parameter" data-model="erdos">Edge probability · p<input id="p" type="number" min="0" max="1" step="0.01" value="0.25" required></label>
+      <label class="parameter" data-model="geometric" hidden>Connection radius<input id="radius" type="number" min="0" max="6" step="0.01" value="0.35" required></label>
+      <label class="parameter" data-model="regular" hidden>Degree · d<input id="degree" type="number" min="0" max="49" step="1" value="3" required></label>
+      <label class="parameter" data-model="planar" hidden>Number of edges<input id="edgeCount" type="number" min="0" max="144" step="1" value="24" required></label>
+      <label class="small-control">Tolerance · ε<input id="epsilon" type="number" min="0.000001" max="2" step="any" value="0.15" required></label>
+      <button id="settingsButton" type="button" class="secondary">Round settings <span aria-hidden="true">☷</span></button>
+      <span id="pending" class="pending" hidden>Changes apply to the next graph</span>
+    </form>
+    <div id="notice" class="notice" role="status" aria-live="polite">Starting the game…</div>
+    <div class="workspace">
+      <section class="graph-panel panel" aria-label="Graph and eigenvector visualization">
+        <div class="panel-heading"><div><span class="eyebrow">THE GRAPH</span><h2 id="graphTitle">Your next challenge</h2></div><span id="graphMeta" class="badge">N = 12</span></div>
+        <div class="graph-toolbar">
+          <label>Layout<select id="layout" data-busy><option value="spring">Spring</option><option value="circular">Circular</option><option value="shell">Shell</option><option value="spiral">Spiral</option><option value="random">Random</option><option value="spectral">Spectral</option><option value="planar">Planar</option><option value="geometric">Geometric coordinates</option></select></label>
+          <label>Renderer<select id="renderer" data-busy><option value="svg">Interactive</option><option value="matplotlib">Matplotlib (Python)</option></select></label>
+          <label class="check"><input id="labels" type="checkbox" checked> Node labels</label>
+          <button id="displayButton" class="icon-button" title="Display settings" aria-label="Display settings">⚙</button>
+        </div>
+        <div id="graphStage" class="graph-stage">
+          <svg id="graph" viewBox="0 0 900 580" role="img" aria-label="The graph to inspect"><title>Graph visualization</title></svg>
+          <img id="plot" alt="Matplotlib rendering of the current graph" hidden>
+          <div id="loading" class="loading"><span class="spinner"></span><strong>Preparing your graph</strong><span id="loadingText">Starting the Python engine…</span></div>
+          <div class="canvas-note" id="canvasNote">Drag vertices to explore the graph</div>
+        </div>
+        <div class="vector-bar"><div><span id="vectorDot" class="vector-dot"></span><strong id="vectorTitle">Plain graph</strong><span id="vectorSubtitle">Select a found eigenvalue to see its eigenvector.</span></div><button id="clearVector" class="quiet" hidden data-busy>Clear heatmap</button></div>
+        <div id="legend" class="legend" hidden><span id="legendMin"></span><div><div id="legendGradient"></div><span>Eigenvector component · unit L² norm · center = 0</span></div><span id="legendMax"></span></div>
+        <details id="components" class="components" hidden><summary>Eigenvector components</summary><p>Components follow node labels. Values have unit L² norm.</p><div id="componentValues"></div></details>
+        <div class="graph-foot"><span id="seedLabel">Simple · undirected · unweighted</span><button id="copyChallenge" class="quiet" data-busy>Copy challenge link</button></div>
+      </section>
+      <aside class="play-panel panel" aria-label="Guessing game">
+        <div class="score-heading"><span class="eyebrow">YOUR SCORE</span><span id="roundStatus" class="live-badge">IN PLAY</span></div>
+        <div class="score"><span id="score">1,000</span><span>pts</span></div>
+        <div class="stats"><div><strong id="found">0 <span>/ 12</span></strong><span>eigenvalues found</span></div><div><strong id="attempts">0</strong><span>guesses made</span></div></div>
+        <div class="progress-track"><div id="progress"></div></div>
+        <form id="guessForm"><label for="guess">What’s an eigenvalue?</label><div class="guess-input"><span>λ</span><input id="guess" type="number" step="any" placeholder="e.g. −1.5" autocomplete="off" required data-busy></div><button id="guessButton" type="submit" class="primary" data-busy>Check guess <span aria-hidden="true">→</span></button></form>
+        <p id="guessHelp" class="fine-print">Within ±0.15 counts. Every guess costs 10 points.</p>
+        <div id="feedback" class="feedback" role="status" aria-live="polite">Start anywhere. Eigenvalues can be negative, zero, or positive.</div>
+        <div class="hint-row"><button id="hintButton" class="secondary" data-busy>Show an eigenvector <span id="hintCost">−50</span></button><button id="giveUp" class="quiet" data-busy>Give up</button></div>
+        <div class="spectrum-heading"><h3>Your discoveries</h3><span id="discoveredCount">0 found</span></div>
+        <p class="fine-print">Click an eigenvalue to explore its eigenvector. Repeats count separately.</p>
+        <div id="spectrum" class="spectrum"><span class="empty-spectrum">Your spectrum will appear here.</span></div>
+        <div id="savedHints" class="saved-hints" hidden></div>
+        <div id="saveArea" class="save-area" hidden><label for="playerName">Add this win to your local leaderboard</label><div><input id="playerName" maxlength="24" value="Player" aria-label="Player name"><button id="saveScore" class="secondary">Save</button></div><span id="saveMessage" class="fine-print"></span></div>
+        <details class="history"><summary>Guess history <span id="historyCount">0</span></summary><ol id="historyList"></ol></details>
+      </aside>
+    </div>
+    <footer><span class="math-mark">Av = λv</span><p>A different way to see a graph.<br><span>All eigenvalues include multiplicity. Eigenvector signs and bases of repeated eigenspaces are not unique.</span></p><span id="engineLabel" class="engine-label">Python · NumPy · NetworkX</span></footer>
+  </main>
+  <dialog id="settingsDialog"><div class="dialog-heading"><h2>Round settings</h2><button class="close" data-close="settingsDialog" aria-label="Close settings">×</button></div><p>These settings take effect when you start a new graph.</p><div class="settings-grid">
+    <label>Seed (blank = random)<input id="seed" type="number" min="0" max="4294967295" step="1" placeholder="Random each round"></label>
+    <label>Points per guess<input id="guessCost" type="number" min="1" max="100" step="1" value="10" required></label>
+    <label>Points per hint<input id="hintPenalty" type="number" min="0" max="500" step="1" value="50" required></label>
+    <label data-model="geometric" hidden>Geometric dimension<select id="dimension"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select></label>
+    <label data-model="geometric" hidden>Distance metric<select id="metric"><option value="2">Euclidean (L²)</option><option value="1">Manhattan (L¹)</option><option value="inf">Maximum (L∞)</option></select></label>
+    <label data-model="planar" class="check" hidden><input id="connected" type="checkbox" checked> Require a connected planar graph</label>
+  </div><p id="modelDescription" class="model-description"></p><p>Start at 1,000 points. Every valid numeric guess (including a correct one) costs points; hints cost extra. The score stops at zero, but you may keep guessing. Giving up reveals the full spectrum and scores zero.</p><button class="primary" id="settingsDone">Done</button></dialog>
+  <dialog id="displayDialog"><div class="dialog-heading"><h2>Make it your own</h2><button class="close" data-close="displayDialog" aria-label="Close display settings">×</button></div><p>Change the view any time, without starting a new round.</p><div class="settings-grid"><label>Eigenvector colors<select id="palette"><option value="RdBu_r">Blue ↔ red</option><option value="coolwarm">Cool ↔ warm</option><option value="PuOr">Orange ↔ purple</option><option value="viridis">Viridis</option></select></label><label>Node size<input id="nodeSize" type="range" min="8" max="24" step="1" value="15"></label></div><p>Colors use a symmetric scale from −max |vᵢ| to +max |vᵢ|. Geometric layouts show the first two coordinates (one-dimensional graphs use a line). Spectral layout is based on the graph Laplacian.</p></dialog>
+  <dialog id="rulesDialog"><div class="dialog-heading"><h2>Find the hidden spectrum</h2><button class="close" data-close="rulesDialog" aria-label="Close instructions">×</button></div><ol class="rules"><li>Choose a graph model, number of vertices, and tolerance. Press <strong>New graph</strong> to apply your settings.</li><li>Guess any eigenvalue of the graph’s <strong>unweighted adjacency matrix</strong>. A guess x finds the nearest remaining eigenvalue in [x − ε, x + ε]. One guess finds one occurrence.</li><li>Every numeric guess costs points, whether it succeeds or misses. There is no limit on tries. Repeated eigenvalues need repeated guesses.</li><li>Click a found eigenvalue to color the graph by its eigenvector. A hint reveals a unit eigenvector of an unfound eigenvalue, keeping its eigenvalue hidden.</li><li>Find all N eigenvalues to finish, or give up to reveal them. Save completed rounds to the leaderboard on this browser.</li></ol><p>Changing the layout, colors, or renderer is free. Round parameters and penalties stay fixed until the next graph. The last 100 guesses are shown.</p><p><strong>Planar model:</strong> optional uniform labeled spanning tree, then randomly ordered edges accepted only if planarity is preserved, up to the chosen edge count. This distribution is not uniform over planar graphs.</p><p><strong>Hints:</strong> the sign of an eigenvector is arbitrary. For a repeated eigenvalue, the displayed vector is one vector from an orthonormal basis of its eigenspace.</p></dialog>
+  <dialog id="recordsDialog"><div class="dialog-heading"><h2>Local leaderboard</h2><button class="close" data-close="recordsDialog" aria-label="Close leaderboard">×</button></div><p>Saved on this browser only. Scores from different rules are not directly comparable.</p><label class="check"><input type="checkbox" id="matchingRules" checked> Show only rounds with the current rules</label><div id="recordsList"></div><p class="fine-print">A shared, trusted leaderboard needs a backend. This local board is for personal practice.</p></dialog>
+</body>
+</html>
